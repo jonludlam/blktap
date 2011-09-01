@@ -145,6 +145,7 @@ tapdisk_set_resource_limits(void)
 	rlim.rlim_cur = RLIM_INFINITY;
 	rlim.rlim_max = RLIM_INFINITY;
 
+#if 0
 	err = setrlimit(RLIMIT_MEMLOCK, &rlim);
 	if (err == -1) {
 		EPRINTF("RLIMIT_MEMLOCK failed: %d\n", errno);
@@ -156,6 +157,7 @@ tapdisk_set_resource_limits(void)
 		EPRINTF("mlockall failed: %d\n", errno);
 		return -errno;
 	}
+#endif
 
 #define CORE_DUMP
 #if defined(CORE_DUMP)

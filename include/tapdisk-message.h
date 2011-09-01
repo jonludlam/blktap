@@ -55,6 +55,7 @@ typedef struct tapdisk_message_response  tapdisk_message_response_t;
 typedef struct tapdisk_message_minors    tapdisk_message_minors_t;
 typedef struct tapdisk_message_list      tapdisk_message_list_t;
 typedef struct tapdisk_message_stat      tapdisk_message_stat_t;
+typedef struct tapdisk_message_blkif     tapdisk_message_blkif_t;
 
 struct tapdisk_message_params {
 	tapdisk_message_flag_t           flags;
@@ -99,6 +100,14 @@ struct tapdisk_message_stat {
 	size_t                           length;
 };
 
+struct tapdisk_message_blkif {
+	uint32_t                         domid;
+	uint32_t                         devid;
+	uint32_t                         gref[8];
+	uint32_t                         order;
+	uint32_t                         proto;
+	uint32_t                         port;
+};
 
 struct tapdisk_message {
 	uint16_t                         type;
@@ -113,6 +122,7 @@ struct tapdisk_message {
 		tapdisk_message_response_t response;
 		tapdisk_message_list_t   list;
 		tapdisk_message_stat_t   info;
+		tapdisk_message_blkif_t  blkif;
 	} u;
 };
 
@@ -140,6 +150,10 @@ enum tapdisk_message_id {
 	TAPDISK_MESSAGE_STATS,
 	TAPDISK_MESSAGE_STATS_RSP,
 	TAPDISK_MESSAGE_FORCE_SHUTDOWN,
+	TAPDISK_MESSAGE_XENBLKIF_CONNECT,
+	TAPDISK_MESSAGE_XENBLKIF_CONNECT_RSP,
+	TAPDISK_MESSAGE_XENBLKIF_DISCONNECT,
+	TAPDISK_MESSAGE_XENBLKIF_DISCONNECT_RSP,
 	TAPDISK_MESSAGE_EXIT,
 };
 
@@ -214,6 +228,18 @@ tapdisk_message_name(enum tapdisk_message_id id)
 
 	case TAPDISK_MESSAGE_STATS_RSP:
 		return "stats response";
+
+	case TAPDISK_MESSAGE_XENBLKIF_CONNECT:
+		return "blkif connect";
+
+	case TAPDISK_MESSAGE_XENBLKIF_CONNECT_RSP:
+		return "blkif connect response";
+
+	case TAPDISK_MESSAGE_XENBLKIF_DISCONNECT:
+		return "blkif disconnect";
+
+	case TAPDISK_MESSAGE_XENBLKIF_DISCONNECT_RSP:
+		return "blkif disconnect response";
 
 	case TAPDISK_MESSAGE_EXIT:
 		return "exit";

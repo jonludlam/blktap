@@ -48,6 +48,7 @@
 #include "tapdisk-message.h"
 #include "tapdisk-disktype.h"
 #include "tapdisk-stats.h"
+#include "tapdisk-xenblkif.h"
 #include "tapdisk-control.h"
 
 #define TD_CTL_MAX_CONNECTIONS  10
@@ -93,8 +94,9 @@ struct tapdisk_ctl_conn {
 	struct tapdisk_control_info *info;
 };
 
-#define TAPDISK_MSG_REENTER    (1<<0) /* non-blocking, idempotent */
-#define TAPDISK_MSG_VERBOSE    (1<<1) /* tell syslog about it */
+#define TAPDISK_MSG_REENTER       (1<<0) /* non-blocking, idempotent */
+#define TAPDISK_MSG_VERBOSE       (1<<1) /* tell syslog about it */
+#define TAPDISK_MSG_VERBOSE_ERROR (1<<2) /* tell syslog about it, with errors */
 
 struct tapdisk_control_info {
 	void (*handler)(struct tapdisk_ctl_conn *, tapdisk_message_t *);
@@ -477,10 +479,17 @@ tapdisk_control_write_message(struct tapdisk_ctl_conn *conn,
 			      tapdisk_message_t *message)
 {
 	size_t size = sizeof(*message), count;
+	long flags = conn->info->flags;
 
-	if (conn->info->flags & TAPDISK_MSG_VERBOSE)
-		DBG("sending '%s' message (uuid = %u)\n",
-		    tapdisk_message_name(message->type), message->cookie);
+	if (flags & TAPDISK_MSG_VERBOSE) {
+		if (flags & TAPDISK_MSG_VERBOSE_ERROR)
+			DBG("sending '%s' message (uuid = %u): %d",
+			    tapdisk_message_name(message->type), message->cookie,
+			    message->u.response.error); 
+		else
+			DBG("sending '%s' message (uuid = %u)",
+			    tapdisk_message_name(message->type), message->cookie);
+	}
 
 	count = tapdisk_ctl_conn_write(conn, message, size);
 	WARN_ON(count != size);
@@ -956,6 +965,58 @@ out:
 		conn->out.prod += rv;
 }
 
+static void
+tapdisk_control_xenblkif_connect(struct tapdisk_ctl_conn *conn,
+				 tapdisk_message_t *request)
+{
+	tapdisk_message_blkif_t *blkif = &request->u.blkif;
+	tapdisk_message_t response;
+	td_vbd_t *vbd;
+	int err;
+
+	vbd = tapdisk_server_get_vbd(request->cookie);
+	if (!vbd) {
+		err = -ENODEV;
+		goto out;
+	}
+
+	DPRINTF("connecting vbd-%d-%d to vbd %d\n",
+		blkif->domid, blkif->devid, request->cookie);
+
+	err = tapdisk_xenblkif_connect(blkif->domid, blkif->devid,
+				       blkif->gref, blkif->order,
+				       blkif->proto, blkif->port,
+				       NULL, vbd);
+out:
+	memset(&response, 0, sizeof(response));
+	response.type = TAPDISK_MESSAGE_XENBLKIF_CONNECT_RSP;
+	response.cookie = request->cookie;
+	response.u.response.error = -err;
+	tapdisk_control_write_message(conn, &response);
+}
+
+static void
+tapdisk_control_xenblkif_disconnect(struct tapdisk_ctl_conn *conn,
+				    tapdisk_message_t *request)
+{
+	tapdisk_message_blkif_t *blkif = &request->u.blkif;
+	tapdisk_message_t response;
+	int err;
+
+	DPRINTF("disconnecting vbd-%d-%d from vbd %d\n",
+		blkif->domid, blkif->devid, request->cookie);
+
+	err = tapdisk_xenblkif_disconnect(blkif->domid, blkif->devid);
+
+out:
+	memset(&response, 0, sizeof(response));
+	response.type = TAPDISK_MESSAGE_XENBLKIF_DISCONNECT_RSP;
+	response.cookie = request->cookie;
+	response.u.response.error = -err;
+	tapdisk_control_write_message(conn, &response);
+}
+
+
 struct tapdisk_control_info message_infos[] = {
 	[TAPDISK_MESSAGE_PID] = {
 		.handler = tapdisk_control_get_pid,
@@ -967,11 +1028,11 @@ struct tapdisk_control_info message_infos[] = {
 	},
 	[TAPDISK_MESSAGE_ATTACH] = {
 		.handler = tapdisk_control_attach_vbd,
-		.flags   = TAPDISK_MSG_VERBOSE,
+		.flags   = TAPDISK_MSG_VERBOSE|TAPDISK_MSG_VERBOSE_ERROR,
 	},
 	[TAPDISK_MESSAGE_DETACH] = {
 		.handler = tapdisk_control_detach_vbd,
-		.flags   = TAPDISK_MSG_VERBOSE,
+		.flags   = TAPDISK_MSG_VERBOSE|TAPDISK_MSG_VERBOSE_ERROR,
 	},
 	[TAPDISK_MESSAGE_OPEN] = {
 		.handler = tapdisk_control_open_image,
@@ -979,20 +1040,28 @@ struct tapdisk_control_info message_infos[] = {
 	},
 	[TAPDISK_MESSAGE_PAUSE] = {
 		.handler = tapdisk_control_pause_vbd,
-		.flags   = TAPDISK_MSG_VERBOSE,
+		.flags   = TAPDISK_MSG_VERBOSE|TAPDISK_MSG_VERBOSE_ERROR,
 	},
 	[TAPDISK_MESSAGE_RESUME] = {
 		.handler = tapdisk_control_resume_vbd,
-		.flags   = TAPDISK_MSG_VERBOSE,
+		.flags   = TAPDISK_MSG_VERBOSE|TAPDISK_MSG_VERBOSE_ERROR,
 	},
 	[TAPDISK_MESSAGE_CLOSE] = {
 		.handler = tapdisk_control_close_image,
-		.flags   = TAPDISK_MSG_VERBOSE,
+		.flags   = TAPDISK_MSG_VERBOSE|TAPDISK_MSG_VERBOSE_ERROR,
 	},
 	[TAPDISK_MESSAGE_STATS] = {
 		.handler = tapdisk_control_stats,
 		.flags   = TAPDISK_MSG_REENTER,
 	},
+	[TAPDISK_MESSAGE_XENBLKIF_CONNECT] = {
+		.handler = tapdisk_control_xenblkif_connect,
+		.flags   = TAPDISK_MSG_VERBOSE|TAPDISK_MSG_VERBOSE_ERROR,
+	},
+	[TAPDISK_MESSAGE_XENBLKIF_DISCONNECT] = {
+		.handler = tapdisk_control_xenblkif_disconnect,
+		.flags   = TAPDISK_MSG_VERBOSE||TAPDISK_MSG_VERBOSE_ERROR,
+	}
 };
 
 
@@ -1064,8 +1133,8 @@ busy:
 
 invalid:
 	err = -EINVAL;
-	ERR(err, "rejecting unsupported message '%s'\n",
-	    tapdisk_message_name(message.type));
+	ERR(err, "rejecting unsupported message '%s' (%d)\n",
+	    tapdisk_message_name(message.type), message.type);
 	goto error;
 }
 
