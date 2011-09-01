@@ -4,6 +4,7 @@ AM_CFLAGS += -Werror
 
 AM_CPPFLAGS  = -D_GNU_SOURCE
 AM_CPPFLAGS += -I$(top_srcdir)/include
+AM_CPPFLAGS += -I$(top_srcdir)/xenio
 
 libexec_PROGRAMS = tapdisk
 
@@ -61,6 +62,8 @@ libtapdisk_la_SOURCES += tapdisk-storage.c
 libtapdisk_la_SOURCES += tapdisk-storage.h
 libtapdisk_la_SOURCES += tapdisk-loglimit.c
 libtapdisk_la_SOURCES += tapdisk-loglimit.h
+libtapdisk_la_SOURCES += tapdisk-xenblkif.c
+libtapdisk_la_SOURCES += tapdisk-xenblkif.h
 libtapdisk_la_SOURCES += io-optimize.c
 libtapdisk_la_SOURCES += io-optimize.h
 libtapdisk_la_SOURCES += lock.c

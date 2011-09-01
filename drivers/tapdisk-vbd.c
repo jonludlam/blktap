@@ -48,6 +48,7 @@
 #include "tapdisk-interface.h"
 #include "tapdisk-stats.h"
 #include "tapdisk-storage.h"
+#include "tapdisk-xenblkif.h"
 
 #define DBG(_level, _f, _a...) tlog_write(_level, _f, ##_a)
 #define ERR(_err, _f, _a...) tlog_error(_err, _f, ##_a)
@@ -1406,6 +1407,8 @@ tapdisk_vbd_stats(td_vbd_t *vbd, td_stats_t *st)
 		tapdisk_blktap_stats(vbd->tap, st);
 		tapdisk_stats_leave(st, '}');
 	}
+
+	tapdisk_xenblkif_stats(vbd, st);
 
 	tapdisk_stats_field(st,
 			    "FIXME_enospc_redirect_count",
