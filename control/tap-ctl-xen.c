@@ -36,8 +36,9 @@ int
 tap_ctl_connect_xenblkif(pid_t pid, int minor,
 			 domid_t domid, int devid,
 			 const grant_ref_t *grefs, int order,
+			 evtchn_port_t port,
 			 int proto,
-			 evtchn_port_t port)
+			 const char *pool)
 {
 	tapdisk_message_t message;
 	int i, err;
@@ -48,11 +49,12 @@ tap_ctl_connect_xenblkif(pid_t pid, int minor,
 
 	message.u.blkif.domid = domid;
 	message.u.blkif.devid = devid;
-	message.u.blkif.order = order;
-	message.u.blkif.port  = port;
-
 	for (i = 0; i < 1<<order; i++)
 		message.u.blkif.gref[i] = grefs[i];
+	message.u.blkif.order = order;
+	message.u.blkif.port  = port;
+	message.u.blkif.proto = proto;
+	strncpy(message.u.blkif.pool, pool, sizeof(message.u.blkif.pool));
 
 	err = tap_ctl_connect_send_and_receive(pid, &message, NULL);
 	if (err)

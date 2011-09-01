@@ -88,18 +88,25 @@ int
 xenio_bind_frame_pool(xenio_ctx_t *ctx, const char *name)
 {
 	struct ioctl_gntdev_bind_pool bind;
-	const size_t max = sizeof(bind.name) - 1;
+	const size_t max = sizeof(bind.name);
 	int err;
 
-	if (strnlen(name, max) >= max)
-		return -EINVAL;
+	if (strnlen(name, max) >= max) {
+		err = -EINVAL;
+		goto fail;
+
+	}
 
 	strcpy(bind.name, name);
 
 	err = ioctl(ctx->xcg_handle, IOCTL_GNTDEV_BIND_POOL, &bind);
 	if (err)
-		err = -errno;
+		return -errno;
 
+	return 0;
+
+fail:
+	errno = -err;
 	return err;
 }
 

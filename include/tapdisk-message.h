@@ -106,6 +106,7 @@ struct tapdisk_message_blkif {
 	uint32_t                         gref[8];
 	uint32_t                         order;
 	uint32_t                         proto;
+	char                             pool[TAPDISK_MESSAGE_STRING_LENGTH];
 	uint32_t                         port;
 };
 

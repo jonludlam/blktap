@@ -485,7 +485,7 @@ tapdisk_control_write_message(struct tapdisk_ctl_conn *conn,
 		if (flags & TAPDISK_MSG_VERBOSE_ERROR)
 			DBG("sending '%s' message (uuid = %u): %d",
 			    tapdisk_message_name(message->type), message->cookie,
-			    message->u.response.error); 
+			    -message->u.response.error);
 		else
 			DBG("sending '%s' message (uuid = %u)",
 			    tapdisk_message_name(message->type), message->cookie);
@@ -972,7 +972,10 @@ tapdisk_control_xenblkif_connect(struct tapdisk_ctl_conn *conn,
 	tapdisk_message_blkif_t *blkif = &request->u.blkif;
 	tapdisk_message_t response;
 	td_vbd_t *vbd;
+	const char *pool;
+	size_t len;
 	int err;
+
 
 	vbd = tapdisk_server_get_vbd(request->cookie);
 	if (!vbd) {
@@ -980,13 +983,26 @@ tapdisk_control_xenblkif_connect(struct tapdisk_ctl_conn *conn,
 		goto out;
 	}
 
-	DPRINTF("connecting vbd-%d-%d to vbd %d\n",
-		blkif->domid, blkif->devid, request->cookie);
+	len = strnlen(blkif->pool, sizeof(blkif->pool));
+	if (!len)
+		pool = NULL;
+	else if (len >= sizeof(blkif->pool)) {
+		err = -EINVAL;
+		goto out;
+	} else
+		pool = blkif->pool;
 
-	err = tapdisk_xenblkif_connect(blkif->domid, blkif->devid,
-				       blkif->gref, blkif->order,
-				       blkif->proto, blkif->port,
-				       NULL, vbd);
+	DPRINTF("connecting vbd-%d-%d to minor %d, pool %s, evt %d\n",
+		blkif->domid, blkif->devid, request->cookie, pool, blkif->port);
+
+	err = tapdisk_xenblkif_connect(blkif->domid,
+				       blkif->devid,
+				       blkif->gref,
+				       blkif->order,
+				       blkif->port,
+				       blkif->proto,
+				       pool,
+				       vbd);
 out:
 	memset(&response, 0, sizeof(response));
 	response.type = TAPDISK_MESSAGE_XENBLKIF_CONNECT_RSP;
@@ -1008,7 +1024,6 @@ tapdisk_control_xenblkif_disconnect(struct tapdisk_ctl_conn *conn,
 
 	err = tapdisk_xenblkif_disconnect(blkif->domid, blkif->devid);
 
-out:
 	memset(&response, 0, sizeof(response));
 	response.type = TAPDISK_MESSAGE_XENBLKIF_DISCONNECT_RSP;
 	response.cookie = request->cookie;

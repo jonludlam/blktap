@@ -11,6 +11,7 @@ AC_PROG_MAKE_SET
 AC_CANONICAL_HOST
 AC_CHECK_HEADERS([uuid/uuid.h], [], [Need uuid-dev])
 AC_CHECK_HEADERS([libaio.h], [], [Need libaio-dev])
+AC_CHECK_HEADERS([xen/xen.h], [], [Need libxen-dev])
 
 AC_ARG_WITH([libiconv],
 	     [AS_HELP_STRING([--with-libiconv],
@@ -35,6 +36,10 @@ AS_IF([test x$with_libiconv != xno],
       [AC_CHECK_LIB([], [iconv_open],
                     [:],
 		    AC_MSG_ERROR([Missing iconv in libc]))])
+
+AC_CHECK_LIB([xenctrl], [main],
+             [:],
+	     AC_MSG_ERROR([Need libxen-dev]))
 
 AC_ARG_ENABLE([tests],
 	      [AS_HELP_STRING([--enable-tests],
@@ -66,6 +71,7 @@ AC_CONFIG_FILES([
 Makefile
 lvm/Makefile
 part/Makefile
+xenio/Makefile
 vhd/Makefile
 vhd/lib/Makefile
 vhd/lib/test/Makefile

@@ -46,6 +46,7 @@ Makefile.in
 /part/Makefile
 /drivers/Makefile
 /control/Makefile
+/xenio/Makefile
 /include/Makefile
 /vhd/Makefile
 /vhd/lib/Makefile

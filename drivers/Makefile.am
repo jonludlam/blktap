@@ -83,3 +83,4 @@ libtapdisk_la_SOURCES += block-llcache.c
 
 libtapdisk_la_LIBADD  = ../vhd/lib/libvhd.la
 libtapdisk_la_LIBADD += -laio
+libtapdisk_la_LIBADD += ../xenio/libxenio.la

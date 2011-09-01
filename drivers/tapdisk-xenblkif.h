@@ -30,13 +30,16 @@
 #ifndef _TAPDISK_XENBLKIF_H_
 #define _TAPDISK_XENBLKIF_H_
 
-/* NB. may be NULL, but then the image must be bouncing I/O */
-#define TD_XENBLKIF_DEFAULT_POOL "td-xenio-default"
+#include <xen/xen.h>
+#include <xen/grant_table.h>
+#include <xen/event_channel.h>
 
 int tapdisk_xenblkif_connect(domid_t domid, int devid,
 			     const grant_ref_t *grefs, int order,
-			     int proto, evtchn_port_t port,
-			     const char *pool, td_vbd_t *vbd);
+			     evtchn_port_t port,
+			     int proto,
+			     const char *pool,
+			     td_vbd_t *vbd);
 
 int tapdisk_xenblkif_disconnect(domid_t domid, int devid);
 

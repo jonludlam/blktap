@@ -960,6 +960,7 @@ blkback_connect_tap(xenio_device_t *xbdev)
 	evtchn_port_t port;
 	grant_ref_t gref;
 	int n, proto, err;
+	char *pool;
 
 	n = xenio_device_scanf_otherend(xbdev, "ring-ref",
 					"%u", &gref);
@@ -975,13 +976,16 @@ blkback_connect_tap(xenio_device_t *xbdev)
 	if (proto < 0)
 		goto fail;
 
+	pool = xenio_device_read(xbdev, "sm-data/frame-pool");
+
 	err = blkback_find_tapdisk(bdev);
 	if (err)
 		goto fail;
 
-	DBG("connecting vbd-%d-%d (gnt %d, evt %d) to tapdisk %d minor %d\n",
+	DBG("connecting vbd-%d-%d (gnt %d, evt %d, proto %d, pool %s)"
+	    " to tapdisk %d minor %d\n",
 	    bdev->domid, bdev->devid,
-	    gref, port,
+	    gref, port, proto, pool,
 	    bdev->tap.pid, bdev->tap.minor);
 
 	err = tap_ctl_connect_xenblkif(bdev->tap.pid,
@@ -989,8 +993,8 @@ blkback_connect_tap(xenio_device_t *xbdev)
 				       bdev->domid,
 				       bdev->devid,
 				       &gref, 0,
-				       proto,
-				       bdev->port);
+				       port, proto,
+				       pool);
 	DBG("err=%d errno=%d\n", err, errno);
 	if (err)
 		goto fail;

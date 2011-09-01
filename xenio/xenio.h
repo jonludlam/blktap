@@ -20,6 +20,8 @@
 #ifndef _XENIO_H
 #define _XENIO_H
 
+#define _FILE_OFFSET_BITS 64
+
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/mman.h>
@@ -149,7 +151,7 @@ struct xenio_blkif_req {
 	uint64_t                id;
 	int                     status;
 
-	off64_t                 offset;
+	off_t                   offset;
 	struct xenio_blkif_seg {
 		uint8_t         first;
 		uint8_t         last;

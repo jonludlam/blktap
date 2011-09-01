@@ -46,7 +46,9 @@
 #include "xenio.h"
 #include "list.h"
 
-#define unlikely(_cond)         (_cond)
+/* NB. may be NULL, but then the image must be bouncing I/O */
+#define TD_XENBLKIF_DEFAULT_POOL "td-xenio-default"
+
 #define BUG_ON(_cond)           if (unlikely(_cond)) { td_panic(); }
 
 #define WARN(_fmt, _args ...)						\
@@ -72,9 +74,6 @@
 	}								\
 	__cond;							\
 })
-
-#define containerof(_ptr, _type, _member)			\
-	((_type*)((void*)(_ptr) - offsetof(_type, _member)))
 
 typedef struct td_xenio_ctx td_xenio_ctx_t;
 typedef struct td_xenblkif td_xenblkif_t;
@@ -369,7 +368,7 @@ tapdisk_xenblkif_queue_requests(td_xenblkif_t *blkif,
 void
 tapdisk_xenblkif_ring_event(td_xenblkif_t *blkif)
 {
-	int n_reqs, final, err;
+	int n_reqs, final;
 
 	blkif->stats.kicks.in++;
 
@@ -407,7 +406,6 @@ tapdisk_xenio_ctx_ring_event(event_id_t id, char mode, void *private)
 	td_xenio_ctx_t *ctx = private;
 	xenio_blkif_t *xenio;
 	td_xenblkif_t *blkif;
-	void *data;
 
 	xenio = xenio_pending_blkif(ctx->xenio,
 				    (void**)&blkif);
@@ -510,6 +508,10 @@ tapdisk_xenio_ctx_open(const char *pool)
 		goto fail;
 	}
 
+	/*
+	 * attach to some frame pool
+	 */
+
 	if (pool) {
 		ctx->pool = strdup(pool);
 		if (!ctx->pool) {
@@ -521,6 +523,7 @@ tapdisk_xenio_ctx_open(const char *pool)
 
 	if (ctx->pool) {
 		err = xenio_bind_frame_pool(ctx->xenio, ctx->pool);
+		WARN_ON_WITH_ERRNO(err);
 		if (err) {
 			err = -errno;
 			goto fail;
@@ -553,16 +556,16 @@ tapdisk_xenio_ctx_get(const char *pool, td_xenio_ctx_t **_ctx)
 	td_xenio_ctx_t *ctx;
 	int err = 0;
 
-retry:
-	tapdisk_xenio_find_ctx(ctx,
-			       __td_xenio_ctx_match(ctx, pool));
-	if (!ctx) {
-		err = tapdisk_xenio_ctx_open(pool);
-		if (!err)
-			goto retry;
-	}
+	do {
+		tapdisk_xenio_find_ctx(ctx,
+				       __td_xenio_ctx_match(ctx, pool));
+		if (ctx) {
+			*_ctx = ctx;
+			return 0;
+		}
 
-	*_ctx = ctx;
+		err = tapdisk_xenio_ctx_open(pool);
+	} while (!err);
 
 	return err;
 }
@@ -627,8 +630,11 @@ tapdisk_xenblkif_disconnect(domid_t domid, int devid)
 
 int
 tapdisk_xenblkif_connect(domid_t domid, int devid,
-			 const grant_ref_t *grefs, int order, int proto,
-			 evtchn_port_t port, const char *pool, td_vbd_t *vbd)
+			 const grant_ref_t *grefs, int order,
+			 evtchn_port_t port,
+			 int proto,
+			 const char *pool,
+			 td_vbd_t *vbd)
 {
 	td_xenblkif_t *blkif = NULL;
 	td_xenio_ctx_t *ctx;
@@ -656,9 +662,10 @@ tapdisk_xenblkif_connect(domid_t domid, int devid,
 	list_add_tail(&blkif->ctx_entry, &ctx->blkifs);
 
 	blkif->xenio = xenio_blkif_connect(ctx->xenio,
-					   domid, grefs, order, port,
-					   proto,
+					   domid,
+					   grefs, order, port, proto,
 					   blkif);
+	WARN_ON_WITH_ERRNO(!blkif->xenio);
 	if (!blkif->xenio) {
 		err = -errno;
 		goto fail;
