@@ -46,9 +46,6 @@
 #include "xenio.h"
 #include "list.h"
 
-/* NB. may be NULL, but then the image must be bouncing I/O */
-#define TD_XENBLKIF_DEFAULT_POOL "td-xenio-default"
-
 #define BUG_ON(_cond)           if (unlikely(_cond)) { td_panic(); }
 
 #define WARN(_fmt, _args ...)						\
@@ -80,8 +77,6 @@ typedef struct td_xenblkif td_xenblkif_t;
 typedef struct td_xenblkif_req td_xenblkif_req_t;
 
 struct td_xenio_ctx {
-	char                   *pool;
-
 	xenio_ctx_t            *xenio;
 
 	event_id_t              ring_event;
@@ -310,7 +305,7 @@ tapdisk_xenblkif_make_vbd_request(td_xenblkif_t *blkif,
 		return err;
 
 	snprintf(tapreq->name, sizeof(tapreq->name),
-		 "xenvbd-%d-%d.%llx",
+		 "xenvbd-%d-%d.%"PRIu64,
 		 blkif->domid, blkif->devid, tapreq->xenio.id);
 
 	vreq->op    = op;
@@ -393,13 +388,6 @@ tapdisk_xenblkif_ring_event(td_xenblkif_t *blkif)
 	} while (1);
 }
 
-void
-tapdisk_xenblkif_grant_event(td_xenblkif_t *blkif)
-{
-	DBG("tapdisk_xenblkif_grant_event: rd=%d devid=%d",
-	    blkif->domid, blkif->devid);
-}
-
 static void
 tapdisk_xenio_ctx_ring_event(event_id_t id, char mode, void *private)
 {
@@ -411,16 +399,6 @@ tapdisk_xenio_ctx_ring_event(event_id_t id, char mode, void *private)
 				    (void**)&blkif);
 	if (xenio)
 		tapdisk_xenblkif_ring_event(blkif);
-}
-
-static void
-tapdisk_xenio_ctx_grant_event(event_id_t id, char mode, void *private)
-{
-	td_xenio_ctx_t *ctx = private;
-	td_xenblkif_t *blkif;
-
-	tapdisk_xenio_for_each_blkif(blkif, ctx)
-		tapdisk_xenblkif_grant_event(blkif);
 }
 
 static void
@@ -445,13 +423,10 @@ tapdisk_xenio_ctx_close(td_xenio_ctx_t *ctx)
 }
 
 static int
-tapdisk_xenio_ctx_open(const char *pool)
+tapdisk_xenio_ctx_open()
 {
 	td_xenio_ctx_t *ctx;
 	int fd, err;
-
-	if (pool && !strlen(pool))
-		return -EINVAL;
 
 	ctx = calloc(1, sizeof(*ctx));
 
@@ -488,48 +463,6 @@ tapdisk_xenio_ctx_open(const char *pool)
 		goto fail;
 	}
 
-	/*
-	 * poll gntdev mmap events
-	 */
-
-	fd = xenio_grant_event_fd(ctx->xenio);
-	if (fd < 0) {
-		err = -errno;
-		goto fail;
-	}
-
-	ctx->grant_event =
-		tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
-					      fd, 0,
-					      tapdisk_xenio_ctx_grant_event,
-					      ctx);
-	if (ctx->grant_event < 0) {
-		err = ctx->grant_event;
-		goto fail;
-	}
-
-	/*
-	 * attach to some frame pool
-	 */
-
-	if (pool) {
-		ctx->pool = strdup(pool);
-		if (!ctx->pool) {
-			err = -errno;
-			goto fail;
-		}
-	} else
-		ctx->pool = TD_XENBLKIF_DEFAULT_POOL;
-
-	if (ctx->pool) {
-		err = xenio_bind_frame_pool(ctx->xenio, ctx->pool);
-		WARN_ON_WITH_ERRNO(err);
-		if (err) {
-			err = -errno;
-			goto fail;
-		}
-	}
-
 	return 0;
 
 fail:
@@ -538,33 +471,26 @@ fail:
 }
 
 static int
-__td_xenio_ctx_match(td_xenio_ctx_t *ctx, const char *pool)
+__td_xenio_ctx_match(td_xenio_ctx_t *ctx)
 {
-	if (unlikely(!pool)) {
-		if (TD_XENBLKIF_DEFAULT_POOL)
-			return !strcmp(ctx->pool, TD_XENBLKIF_DEFAULT_POOL);
-		else
-			return !ctx->pool;
-	}
-
-	return !strcmp(ctx->pool, pool);
+  return 1;
 }
 
 static int
-tapdisk_xenio_ctx_get(const char *pool, td_xenio_ctx_t **_ctx)
+tapdisk_xenio_ctx_get(td_xenio_ctx_t **_ctx)
 {
 	td_xenio_ctx_t *ctx;
 	int err = 0;
 
 	do {
 		tapdisk_xenio_find_ctx(ctx,
-				       __td_xenio_ctx_match(ctx, pool));
+				       __td_xenio_ctx_match(ctx));
 		if (ctx) {
 			*_ctx = ctx;
 			return 0;
 		}
 
-		err = tapdisk_xenio_ctx_open(pool);
+		err = tapdisk_xenio_ctx_open();
 	} while (!err);
 
 	return err;
@@ -633,7 +559,6 @@ tapdisk_xenblkif_connect(domid_t domid, int devid,
 			 const grant_ref_t *grefs, int order,
 			 evtchn_port_t port,
 			 int proto,
-			 const char *pool,
 			 td_vbd_t *vbd)
 {
 	td_xenblkif_t *blkif = NULL;
@@ -650,7 +575,7 @@ tapdisk_xenblkif_connect(domid_t domid, int devid,
 		goto fail;
 	}
 
-	err = tapdisk_xenio_ctx_get(pool, &ctx);
+	err = tapdisk_xenio_ctx_get(&ctx);
 	if (err)
 		goto fail;
 
@@ -687,7 +612,6 @@ fail:
 static void
 __tapdisk_xenblkif_stats(td_xenblkif_t *blkif, td_stats_t *st)
 {
-	tapdisk_stats_field(st, "pool", blkif->ctx->pool);
 	tapdisk_stats_field(st, "domid", "d", blkif->domid);
 	tapdisk_stats_field(st, "devid", "d", blkif->devid);
 

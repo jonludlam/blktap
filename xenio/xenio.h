@@ -46,46 +46,6 @@ xenio_ctx_t *xenio_open(void);
 void xenio_close(xenio_ctx_t *ctx);
 
 /*
- * Frame pools.
- *
- * Pools back mmapped request grants with normal memory in the
- * caller's domain. Requisite for zero-copy I/O, such as using
- * O_DIRECT on blkif requests.
- *
- * Frame pools allocate local domain memory. They may have arbitrary
- * size, controllable in sysfs, but normally limited to match physical
- * layer capabilities. Multiple tasks/contexts may bind to the same
- * pool.
- */
-
-/*
- * xenio_bind_frame_pool: Bind an I/O context to a frame pool
- * identified by @name. If the context does not exist, it is
- * created. Size and parameters are in sysfs. Names may be up to 36
- * bytes. All previous grant maps must be munmapped and revoked.
- *
- * Returns 0 on success, or -errno on error.
- *
- * ERRORS:
- *  EBUSY - Context had active grant and memory maps.
- *  EALREADY - Context already bound.
- */
-int xenio_bind_frame_pool(xenio_ctx_t *ctx, const char *name);
-
-/*
- * xenio_unbind_frame_pool: Unbind a bound frame pool from @ctx. All
- * previous grant maps must be munmapped and revoked. Last binding
- * dropped will garbage collect the pool.
- *
- * Returns 0 on success, or -errno on error.
- *
- * ERRORS:
- *  EBUSY -  Context had active grant and memory maps.
- *  ENOENT - Context not bound.
- */
-int xenio_unbind_frame_pool(xenio_ctx_t *ctx);
-
-/*
  * xenio_event_fd: Synchronous I/O multiplexing for guest
  * notifications.
  *
@@ -205,53 +165,10 @@ int xenio_blkif_mmap_one(xenio_blkif_t *blkif, xenio_blkif_req_t *req);
 int xenio_blkif_munmap_one(xenio_blkif_t *blkif, xenio_blkif_req_t *req);
 
 /*
- * Batch request mapping.
- *
- * Good for applications with lots of guest I/O
- * on shared storage.
- */
-
-/*
- * xenio_blkif_map_grants: Establish a grant mapping for a batch of
- * requests. If the blkif context was bound to a frame pool, mapped
- * requests will be backed with page structs. Despite this call
- * succeeding, the latter may happen only asynchronously.
- */
-int64_t xenio_blkif_map_grants(xenio_blkif_t *blkif,
-			       xenio_blkif_req_t **reqs, int count);
-
-/*
- * xenio_blkif_unmap_grants: Revoke a grant mapping. Prevents
- * re-mmapping, but doesn't affect existing VMAs, so may forego
- * munmapping through xenio_blkif_munmap_request.
- */
-int xenio_blkif_unmap_grants(xenio_blkif_t *blkif, int64_t id);
-
-/*
- * xenio_blkif_mmap_requests: Map a batch of requests with established
- * grant mapping(s) into task memory.
- *
- * Iff the grant device was bound to a frame pool, this may fail
- * transiently with EAGAIN. Poll xenio_grant_event_fd for
- * notifications.
- *
- * On success, returns 0 and leaves segment ranges in @req->vma and
- * @req->iovec. Sets and returns -errno on failure.
- */
-int xenio_blkif_mmap_requests(xenio_blkif_t *blkif,
-			      xenio_blkif_req_t **reqs, int count);
-
-/*
- * xenio_blkif_munmap_request: Unmap a previously mmapped @request.
- */
-int xenio_blkif_munmap_request(xenio_blkif_t *blkif,
-			       xenio_blkif_req_t *req);
-
-/*
  * Write @count responses, with result codes according to
  */
 void xenio_blkif_put_responses(xenio_blkif_t *blkif,
-			       xenio_blkif_req_t **reqs, int count,
-			       int final);
+                              xenio_blkif_req_t **reqs, int count,
+                              int final);
 
 #endif /* _XENIO_H */

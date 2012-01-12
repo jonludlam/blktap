@@ -38,7 +38,6 @@ int tapdisk_xenblkif_connect(domid_t domid, int devid,
 			     const grant_ref_t *grefs, int order,
 			     evtchn_port_t port,
 			     int proto,
-			     const char *pool,
 			     td_vbd_t *vbd);
 
 int tapdisk_xenblkif_disconnect(domid_t domid, int devid);

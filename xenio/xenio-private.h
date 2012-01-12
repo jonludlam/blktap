@@ -23,8 +23,8 @@
 #include "list.h"
 
 struct xenio_ctx {
-	int              xcg_handle;
-	int              xce_handle;
+    xc_gnttab        *xcg_handle;
+	xc_evtchn        *xce_handle;
 	struct list_head ifs;
 };
 

@@ -55,3 +55,6 @@ Makefile.in
 # dist output
 /blktap-*.tar.*
 /blktap-*/
+
+/xenio/blkback
+

@@ -180,118 +180,6 @@ fail:
 	return err;
 }
 
-int
-xenio_blkif_mmap_requests(xenio_blkif_t *blkif,
-			  xenio_blkif_req_t **reqs, int count)
-{
-	xenio_ctx_t *ctx = blkif->ctx;
-	int err = 0;
-	int i, j;
-
-	i = 0;
-	while (i < count) {
-		xenio_blkif_req_t *prev  = reqs[i];
-		int n_segs, prot, flags;
-		off_t pgoff;
-		void *vma;
-
-		pgoff  = prev->pgoff;
-		n_segs = prev->n_segs;
-
-		for (j = i + 1; j < count; j++) {
-			xenio_blkif_req_t *next = reqs[j];
-
-			if (prev->pgoff + prev->n_segs != next->pgoff)
-				break;
-
-			if (prev->op != next->op)
-				break;
-
-			n_segs += next->n_segs;
-		}
-
-		prot  = PROT_READ;
-		prot |= prev->op == BLKIF_OP_READ ? PROT_WRITE : 0;
-		flags = MAP_SHARED;
-
-		vma = mmap(NULL, n_segs << XC_PAGE_SHIFT, prot, flags,
-			   ctx->xcg_handle, pgoff << XC_PAGE_SHIFT);
-		if (vma == MAP_FAILED) {
-			err = -errno;
-			break;
-		}
-
-		for (; i <= j; i++) {
-			xenio_blkif_req_t *req = reqs[i];
-
-			req->vma = vma;
-			vma     += req->n_segs << XC_PAGE_SHIFT;
-
-			xenio_blkif_vector_request(req);
-		}
-	}
-
-	return err;
-}
-
-int64_t
-xenio_blkif_map_grants(xenio_blkif_t *blkif,
-		       xenio_blkif_req_t **reqs, int count)
-{
-	struct ioctl_gntdev_map_grant_ref *map = &blkif->arg->map;
-	xenio_ctx_t *ctx = blkif->ctx;
-	uint64_t index;
-	int i, seg, err;
-
-	map->count = 0;
-	for (i = 0; i < count; i++) {
-		xenio_blkif_req_t *req = reqs[i];
-
-		for (seg = 0; seg < req->n_segs; seg++) {
-			struct ioctl_gntdev_grant_ref *entry;
-			entry = &map->refs[map->count++];
-			entry->domid = blkif->rd;
-			entry->ref   = req->gref[seg];
-		}
-	}
-
-	err = ioctl(ctx->xcg_handle, IOCTL_GNTDEV_MAP_GRANT_REF, map);
-	if (err)
-		goto fail;
-
-	index = map->index;
-
-	for (i = 0; i < count; i++) {
-		xenio_blkif_req_t *req = reqs[i];
-
-		req->pgoff = index << XC_PAGE_SHIFT;
-		index     += req->n_segs;
-	}
-
-	return index;
-
-fail:
-	err = -errno;
-	return err;
-}
-
-int
-xenio_blkif_unmap_grants(xenio_blkif_t *blkif, int64_t id)
-{
-	xenio_ctx_t *ctx = blkif->ctx;
-	struct ioctl_gntdev_unmap_grant_ref unmap;
-	int err;
-
-	unmap.index = id;
-	unmap.count = -1;
-
-	err = ioctl(ctx->xcg_handle, IOCTL_GNTDEV_UNMAP_GRANT_REF, &unmap);
-	if (err)
-		err = -errno;
-
-	return err;
-}
-
 static int
 xenio_blkif_notify(xenio_blkif_t *blkif)
 {
@@ -419,7 +307,7 @@ xenio_blkif_put_responses(xenio_blkif_t *blkif,
 			  int final)
 {
 	blkif_common_back_ring_t *ring = &blkif->rings.common;
-	int n, notify, err = 0;
+	int n, notify;
 	RING_IDX rp;
 
 	for (rp = ring->rsp_prod_pvt, n = 0; n < count; n++, rp++) {
@@ -438,7 +326,7 @@ xenio_blkif_put_responses(xenio_blkif_t *blkif,
 	if (final) {
 		RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(ring, notify);
 		if (notify)
-			err = xenio_blkif_notify(blkif);
+			xenio_blkif_notify(blkif);
 	}
 }
 

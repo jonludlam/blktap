@@ -972,8 +972,6 @@ tapdisk_control_xenblkif_connect(struct tapdisk_ctl_conn *conn,
 	tapdisk_message_blkif_t *blkif = &request->u.blkif;
 	tapdisk_message_t response;
 	td_vbd_t *vbd;
-	const char *pool;
-	size_t len;
 	int err;
 
 
@@ -983,17 +981,8 @@ tapdisk_control_xenblkif_connect(struct tapdisk_ctl_conn *conn,
 		goto out;
 	}
 
-	len = strnlen(blkif->pool, sizeof(blkif->pool));
-	if (!len)
-		pool = NULL;
-	else if (len >= sizeof(blkif->pool)) {
-		err = -EINVAL;
-		goto out;
-	} else
-		pool = blkif->pool;
-
-	DPRINTF("connecting vbd-%d-%d to minor %d, pool %s, evt %d\n",
-		blkif->domid, blkif->devid, request->cookie, pool, blkif->port);
+	DPRINTF("connecting vbd-%d-%d to minor %d, evt %d\n",
+		blkif->domid, blkif->devid, request->cookie, blkif->port);
 
 	err = tapdisk_xenblkif_connect(blkif->domid,
 				       blkif->devid,
@@ -1001,7 +990,6 @@ tapdisk_control_xenblkif_connect(struct tapdisk_ctl_conn *conn,
 				       blkif->order,
 				       blkif->port,
 				       blkif->proto,
-				       pool,
 				       vbd);
 out:
 	memset(&response, 0, sizeof(response));

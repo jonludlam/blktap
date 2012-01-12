@@ -37,8 +37,7 @@ int tap_ctl_connect_xenblkif(pid_t pid, int minor,
 			     domid_t domid, int devid,
 			     const grant_ref_t *grefs, int order,
 			     evtchn_port_t port,
-			     int proto,
-			     const char *pool);
+			     int proto);
 
 int tap_ctl_disconnect_xenblkif(pid_t pid, int minor,
 				domid_t domid, int devid,

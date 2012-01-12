@@ -183,24 +183,6 @@ xenio_xs_exists(struct xs_handle *xs, xs_transaction_t xst,
 	return s != NULL;
 }
 
-__printf(2, 3)
-static bool
-xenio_xs_rm(xenio_backend_t *backend, const char *fmt, ...)
-{
-	char *path;
-	va_list ap;
-	bool nerr;
-
-	va_start(ap, fmt);
-	path = vmprintf(fmt, ap);
-	va_end(ap);
-
-	nerr = xs_rm(backend->xs, backend->xst, path);
-	free(path);
-
-	return nerr;
-}
-
 static char *
 xenio_device_read(xenio_device_t *device, const char *path)
 {
@@ -215,7 +197,6 @@ static int
 xenio_device_vscanf(xenio_device_t *device,
 		    const char *path, const char *fmt, va_list ap)
 {
-	xenio_backend_t *backend = device->backend;
 	char *s;
 	int n;
 
@@ -235,7 +216,6 @@ static int
 xenio_device_scanf(xenio_device_t *device,
 		   const char *path, const char *fmt, ...)
 {
-	xenio_backend_t *backend = device->backend;
 	va_list ap;
 	int n;
 
@@ -260,7 +240,6 @@ static int
 xenio_device_vscanf_otherend(xenio_device_t *device,
 			     const char *path, const char *fmt, va_list ap)
 {
-	xenio_backend_t *backend = device->backend;
 	char *s;
 	int n;
 
@@ -287,16 +266,6 @@ xenio_device_scanf_otherend(xenio_device_t *device,
 	va_end(ap);
 
 	return n;
-}
-
-static void
-xenio_device_rm(xenio_device_t *device, const char *path)
-{
-	xenio_backend_t *backend = device->backend;
-
-	xenio_xs_rm(backend,
-		    "%s/%d/%s/%s",
-		    backend->path, device->domid, device->name, path);
 }
 
 static int
@@ -372,7 +341,6 @@ xenio_device_printf(xenio_device_t *device,
 static long long
 xenio_device_check_serial(xenio_device_t *device)
 {
-	unsigned int len;
 	long long serial;
 	int n, err;
 
@@ -442,19 +410,17 @@ static void
 xenio_device_check_frontend_state(xenio_device_t *device)
 {
 	xenio_backend_t *backend = device->backend;
-	int state, err;
+	int state;
 	char *s, *end;
 
 	s = xenio_xs_read(backend->xs, backend->xst,
-			  device->frontend_state_path);
+			  "%s",device->frontend_state_path);
 	if (!s) {
-		err = -errno;
 		goto fail;
 	}
 
 	state = strtol(s, &end, 0);
 	if (*end != 0 || end == s) {
-		err = -EINVAL;
 		goto fail;
 	}
 
@@ -505,7 +471,6 @@ xenio_backend_create_device(xenio_backend_t *backend,
 			    int domid, const char *name)
 {
 	xenio_device_t *device;
-	char *path;
 	int err;
 
 	device = calloc(1, sizeof(*device));
@@ -993,8 +958,7 @@ blkback_connect_tap(xenio_device_t *xbdev)
 				       bdev->domid,
 				       bdev->devid,
 				       &gref, 0,
-				       port, proto,
-				       pool);
+				       port, proto);
 	DBG("err=%d errno=%d\n", err, errno);
 	if (err)
 		goto fail;
@@ -1139,7 +1103,6 @@ blkback_probe(xenio_device_t *xbdev, domid_t domid, const char *name)
 	blkback_device_t *bdev;
 	int n, major, minor, err;
 	char *end;
-	dev_t dev;
 
 	DBG("probe %s-%d-%s\n",
 	    xbdev->backend->name, xbdev->domid, xbdev->name);
@@ -1200,8 +1163,6 @@ blkback_remove(xenio_device_t *xbdev)
 void
 blkback_frontend_changed(xenio_device_t *xbdev, XenbusState state)
 {
-	blkback_device_t *bdev = xbdev->private;
-
 	DBG("frontend_changed %s-%d-%s state=%d\n",
 	    xbdev->backend->name, xbdev->domid, xbdev->name, state);
 

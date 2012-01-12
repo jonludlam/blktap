@@ -32,12 +32,12 @@ xenio_close(xenio_ctx_t *ctx)
 {
 	if (ctx->xce_handle >= 0) {
 		xc_evtchn_close(ctx->xce_handle);
-		ctx->xce_handle = -1;
+		ctx->xce_handle = NULL;
 	}
 
 	if (ctx->xcg_handle >= 0) {
-		xc_evtchn_close(ctx->xcg_handle);
-		ctx->xcg_handle = -1;
+		xc_gnttab_close(ctx->xcg_handle);
+		ctx->xcg_handle = NULL;
 	}
 
 	free(ctx);
@@ -56,14 +56,14 @@ xenio_open(void)
 	}
 	INIT_LIST_HEAD(&ctx->ifs);
 
-	ctx->xce_handle = xc_evtchn_open();
-	if (ctx->xce_handle < 0) {
+	ctx->xce_handle = xc_evtchn_open(NULL, 0);
+	if (ctx->xce_handle == NULL) {
 		err = -errno;
 		goto fail;
 	}
 
-	ctx->xcg_handle = xc_gnttab_open();
-	if (ctx->xcg_handle < 0) {
+	ctx->xcg_handle = xc_gnttab_open(NULL, 0);
+	if (ctx->xcg_handle == NULL) {
 		err = -errno;
 		goto fail;
 	}
@@ -84,46 +84,3 @@ xenio_event_fd(xenio_ctx_t *ctx)
 	return xc_evtchn_fd(ctx->xce_handle);
 }
 
-int
-xenio_bind_frame_pool(xenio_ctx_t *ctx, const char *name)
-{
-	struct ioctl_gntdev_bind_pool bind;
-	const size_t max = sizeof(bind.name);
-	int err;
-
-	if (strnlen(name, max) >= max) {
-		err = -EINVAL;
-		goto fail;
-
-	}
-
-	strcpy(bind.name, name);
-
-	err = ioctl(ctx->xcg_handle, IOCTL_GNTDEV_BIND_POOL, &bind);
-	if (err)
-		return -errno;
-
-	return 0;
-
-fail:
-	errno = -err;
-	return err;
-}
-
-int
-xenio_unbind_frame_pool(xenio_ctx_t *ctx)
-{
-	int err;
-
-	err = ioctl(ctx->xcg_handle, IOCTL_GNTDEV_UNBIND_POOL);
-	if (err)
-		err = -errno;
-
-	return err;
-}
-
-int
-xenio_grant_event_fd(xenio_ctx_t *ctx)
-{
-	return ctx->xcg_handle;
-}
