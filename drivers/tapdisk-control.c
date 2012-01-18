@@ -54,6 +54,7 @@
 #include "tapdisk-disktype.h"
 #include "tapdisk-stats.h"
 #include "tapdisk-control.h"
+#include "tapdisk-nbdserver.h"
 
 #define TD_CTL_MAX_CONNECTIONS  10
 #define TD_CTL_SOCK_BACKLOG     32
@@ -760,6 +761,8 @@ tapdisk_control_open_image(struct tapdisk_ctl_conn *conn,
 		EPRINTF("create device failed: %d\n", err);
 		goto fail_close;
 	}
+
+	err = tapdisk_nbdserver_open(vbd, &info);
 
 	err = 0;
 

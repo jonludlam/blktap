@@ -10,6 +10,7 @@ AC_PROG_LN_S
 AC_PROG_MAKE_SET
 AC_CANONICAL_HOST
 AC_SYS_LARGEFILE
+AC_C_BIGENDIAN
 AC_CHECK_HEADERS([uuid/uuid.h], [], [Need uuid-dev])
 AC_CHECK_HEADERS([libaio.h], [], [Need libaio-dev])
 

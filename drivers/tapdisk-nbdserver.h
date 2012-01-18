@@ -1,5 +1,6 @@
-/* 
- * Copyright (c) 2008, XenSource Inc.
+/*
+ * Copyright (c) 2010, Citrix Systems, Inc.
+ *
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,27 +26,44 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _TAPDISK_UTILS_H_
-#define _TAPDISK_UTILS_H_
 
-#include <inttypes.h>
-#include <sys/time.h>
+#ifndef _TAPDISK_NBDSERVER_H_
+#define _TAPDISK_NBDSERVER_H_
 
-#define MAX_NAME_LEN          1000
-#define TD_SYSLOG_IDENT_MAX   32
-#define TD_SYSLOG_STRTIME_LEN 15
+typedef struct td_nbdserver td_nbdserver_t;
+typedef struct td_nbdserver_req td_nbdserver_req_t;
+typedef struct td_nbdserver_client td_nbdserver_client_t;
 
-int tapdisk_syslog_facility(const char *);
-char* tapdisk_syslog_ident(const char *);
-size_t tapdisk_syslog_strftime(char *, size_t, const struct timeval *);
-size_t tapdisk_syslog_strftv(char *, size_t, const struct timeval *);
-int tapdisk_set_resource_limits(void);
-int tapdisk_namedup(char **, const char *);
-int tapdisk_parse_disk_type(const char *, char **, int *);
-int tapdisk_get_image_size(int, uint64_t *, uint32_t *);
-int tapdisk_linux_version(void);
-uint64_t ntohll(uint64_t);
-#define htonll ntohll
+#include "blktap.h"
+#include "tapdisk-vbd.h"
+#include "list.h"
 
+struct td_nbdserver {
+	td_vbd_t               *vbd;
+	td_disk_info_t          info;
 
-#endif
+	int                     listening_fd;
+	int                     listening_event_id;
+
+	struct list_head        entry;
+
+	LIST_HEAD(clients);
+};
+
+struct td_nbdserver_client {
+	int                     n_reqs;
+	td_nbdserver_req_t     *reqs;
+	struct td_iovec        *iovecs;
+	int                     n_reqs_free;
+	td_nbdserver_req_t    **reqs_free;
+
+	int                     client_fd;
+	int                     client_event_id;
+
+	td_nbdserver_t         *server;
+	struct list_head        clientlist;
+};
+
+int tapdisk_nbdserver_open(td_vbd_t *, td_disk_info_t *);
+
+#endif /* _TAPDISK_NBDSERVER_H_ */

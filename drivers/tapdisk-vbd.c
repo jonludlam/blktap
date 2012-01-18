@@ -520,6 +520,7 @@ tapdisk_vbd_attach(td_vbd_t *vbd, const char *devname, int minor)
 	return tapdisk_blktap_open(devname, vbd, &vbd->tap);
 }
 
+/*
 int
 tapdisk_vbd_open(td_vbd_t *vbd, const char *name,
 		 int minor, const char *ring, td_flag_t flags)
@@ -543,7 +544,7 @@ out:
 	vbd->name = NULL;
 	return err;
 }
-
+*/
 static void
 tapdisk_vbd_queue_count(td_vbd_t *vbd, int *new,
 			int *pending, int *failed, int *completed)
