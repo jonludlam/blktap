@@ -149,7 +149,7 @@ int tdexport_send_chunk(struct tdexport_data *prv, const char *buffer, uint32_t 
 	uint32_t bytes_to_send;
 	uint32_t bytes_sent;
 
-	INFO("Sending chunk of size %u at offset %016llx\n", length, offset);
+	INFO("Sending chunk of size %u at offset %"PRIu64"\n", length, offset);
 	if (prv->socket == 0) {
 		ERROR("Cannot send chunk without an open socket\n");
 		return -1;
@@ -163,7 +163,7 @@ int tdexport_send_chunk(struct tdexport_data *prv, const char *buffer, uint32_t 
 		return -1;
 	}
 	if (rc != sizeof(chunk)) {
-		ERROR("Send of %d bytes of chunk header does not match expected %u\n", rc, sizeof(chunk));
+		ERROR("Send of %d bytes of chunk header does not match expected %d\n", (int)rc, (int)sizeof(chunk));
 	}
 
 	bytes_to_send = length;
@@ -227,7 +227,7 @@ int tdexport_send_terminator_chunk(struct tdexport_data *prv)
 		return -1;
 	}
 	if (rc != sizeof(zero)) {
-		ERROR("Send of %d bytes of terminator does not match expected %u\n", rc, sizeof(zero));
+		ERROR("Send of %d bytes of terminator does not match expected %u\n", (int)rc, (int)sizeof(zero));
 		return -1;
 	}
 	INFO("Terminator chunk written successfully\n");
@@ -310,7 +310,7 @@ static void tdexport_queue_read(td_driver_t* driver, td_request_t treq)
 {
         int      size    = treq.secs * driver->info.sector_size;
         uint64_t offset  = treq.sec * (uint64_t)driver->info.sector_size;
-        INFO("READ 0x%016llx (%u)\n", offset, size);
+        INFO("READ %"PRIu64" (%d)\n", offset, size);
 	td_forward_request(treq);
 	//td_complete_request(treq, 0);
 }
@@ -323,7 +323,7 @@ static void tdexport_queue_write(td_driver_t* driver, td_request_t treq)
         
 	//memcpy(img + offset, treq.buf, size);
 
-	INFO("WRITE 0x%016llx (%u)\n", offset, size);
+	INFO("WRITE 0x%"PRIu64" (%u)\n", offset, size);
 
 	tdexport_send_chunk(prv, treq.buf, size, offset);
 
