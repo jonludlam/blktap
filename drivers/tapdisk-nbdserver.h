@@ -47,7 +47,7 @@ struct td_nbdserver {
 
 	struct list_head        entry;
 
-	LIST_HEAD(clients);
+	struct list_head        clients;
 };
 
 struct td_nbdserver_client {

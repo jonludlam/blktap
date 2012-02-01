@@ -79,7 +79,7 @@ int tdnbd_connect_import_session(struct tdnbd_data *prv, td_driver_t* driver)
 		close(sock);
 		return -1;
 	}
-	prv->remote->sin_port = htons(2000);
+	prv->remote->sin_port = htons(prv->port);
   
 	if (connect(sock, (struct sockaddr *)prv->remote, sizeof(struct sockaddr)) < 0) {
 		ERROR("Could not connect to peer: %s\n", strerror(errno));
@@ -174,7 +174,7 @@ int tdnbd_send_chunk(struct tdnbd_data *prv, const char *buffer, uint32_t length
 	struct nbd_request request;
 	struct nbd_reply reply;
 
-	INFO("Sending chunk of size %u at offset %016llx\n", length, offset);
+	INFO("Sending chunk of size %u at offset %"PRIu64"\n", length, offset);
 	if (prv->socket == 0) {
 		ERROR("Cannot send chunk without an open socket\n");
 		return -1;
@@ -192,7 +192,7 @@ int tdnbd_send_chunk(struct tdnbd_data *prv, const char *buffer, uint32_t length
 		return -1;
 	}
 	if (rc != sizeof(request)) {
-		ERROR("Send of %d bytes of chunk header does not match expected %u\n", rc, sizeof(request));
+	  ERROR("Send of %d bytes of chunk header does not match expected %u\n", (int)rc, (int)sizeof(request));
 	}
 
 	bytes_to_send = length;
@@ -243,7 +243,7 @@ int tdnbd_recv_chunk(struct tdnbd_data *prv, char *buffer, uint32_t length, uint
 	struct nbd_request request;
 	struct nbd_reply reply;
 
-	INFO("Receiving chunk of size %u at offset %016llx\n", length, offset);
+	INFO("Receiving chunk of size %u at offset %"PRIu64"\n", length, offset);
 	if (prv->socket == 0) {
 		ERROR("Cannot send chunk without an open socket\n");
 		return -1;
@@ -261,7 +261,7 @@ int tdnbd_recv_chunk(struct tdnbd_data *prv, char *buffer, uint32_t length, uint
 		return -1;
 	}
 	if (rc != sizeof(request)) {
-		ERROR("Send of %d bytes of chunk header does not match expected %u\n", rc, sizeof(request));
+	  ERROR("Send of %d bytes of chunk header does not match expected %u\n", (int)rc, (int)sizeof(request));
 	}
 
 	rc = recv(prv->socket, &reply, sizeof(reply), 0);
@@ -365,7 +365,7 @@ static void tdnbd_queue_read(td_driver_t* driver, td_request_t treq)
   struct tdnbd_data *prv = (struct tdnbd_data *)driver->data;
         int      size    = treq.secs * driver->info.sector_size;
         uint64_t offset  = treq.sec * (uint64_t)driver->info.sector_size;
-        INFO("READ 0x%016llx (%u)\n", offset, size);
+        INFO("READ %"PRIu64" (%u)\n", offset, size);
 
 		tdnbd_recv_chunk(prv, treq.buf, size, offset);
 
@@ -380,7 +380,7 @@ static void tdnbd_queue_write(td_driver_t* driver, td_request_t treq)
         
 	//memcpy(img + offset, treq.buf, size);
 
-	INFO("WRITE 0x%016llx (%u)\n", offset, size);
+	INFO("WRITE %"PRIu64" (%u)\n", offset, size);
 
 	tdnbd_send_chunk(prv, treq.buf, size, offset);
 

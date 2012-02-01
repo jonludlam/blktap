@@ -34,13 +34,21 @@
 
 struct td_nbdserver_req {
 	td_vbd_request_t        vreq;
-	char                    id[8];
+	char                    id[16];
+        struct td_iovec         iov;
 };
+
+void
+tapdisk_nbdserver_disable_client(td_nbdserver_client_t *client);
+void
+tapdisk_nbdserver_clientcb(event_id_t id, char mode, void *data);
 
 td_nbdserver_req_t *
 tapdisk_nbdserver_alloc_request(td_nbdserver_client_t *client)
 {
 	td_nbdserver_req_t *req = NULL;
+
+	INFO("Alloc request...");
 
 	if (likely(client->n_reqs_free))
 		req = client->reqs_free[--client->n_reqs_free];
@@ -51,11 +59,15 @@ tapdisk_nbdserver_alloc_request(td_nbdserver_client_t *client)
 void
 tapdisk_nbdserver_free_request(td_nbdserver_client_t *client, td_nbdserver_req_t *req)
 {
-	BUG_ON(client->n_reqs_free >= client->n_reqs);
+    INFO("Free request...");
+  if(client->n_reqs_free >= client->n_reqs) {
+    ERROR("Error, trying to free a client, but the free list is full! leaking!");
+    return;
+  }
 	client->reqs_free[client->n_reqs_free++] = req;
 }
 
-static void
+void
 tapdisk_nbdserver_reqs_free(td_nbdserver_client_t *client)
 {
 	if (client->reqs) {
@@ -74,10 +86,12 @@ tapdisk_nbdserver_reqs_free(td_nbdserver_client_t *client)
 	}
 }
 
-static int
+int
 tapdisk_nbdserver_reqs_init(td_nbdserver_client_t *client, int n_reqs)
 {
 	int i, err;
+
+	INFO("Reqs init");
 
 	client->reqs = malloc(n_reqs * sizeof(td_nbdserver_req_t));
 	if (!client->reqs) {
@@ -111,17 +125,21 @@ fail:
 	return err;
 }
 
-static td_nbdserver_client_t *
+td_nbdserver_client_t *
 tapdisk_nbdserver_alloc_client(td_nbdserver_t *server)
 {
 	td_nbdserver_client_t *client=NULL;
 	int err;
+
+	INFO("Alloc client");
 
 	client=malloc(sizeof(td_nbdserver_client_t));
 	if(!client) {
 		ERROR("Couldn't allocate client structure: %s",strerror(errno));
 		goto fail;
 	}
+
+	bzero(client, sizeof(td_nbdserver_client_t));
 
 	err = tapdisk_nbdserver_reqs_init(client, NBD_SERVER_NUM_REQS);
 	if(err<0) {
@@ -131,8 +149,11 @@ tapdisk_nbdserver_alloc_client(td_nbdserver_t *server)
 
 	client->client_fd=-1;
 	client->client_event_id=-1;
+	client->server=server;
 	INIT_LIST_HEAD(&client->clientlist);
 	list_add(&client->clientlist, &server->clients);
+
+	return client;
 
  fail:
 	if(client) {
@@ -143,9 +164,12 @@ tapdisk_nbdserver_alloc_client(td_nbdserver_t *server)
 	return client;
 }
 
-static void
+void
 tapdisk_nbdserver_free_client(td_nbdserver_client_t *client)
 {
+
+    INFO("Free client");
+
 	if(!client) {
 		ERROR("Attempt to free NULL pointer!");
 		return;
@@ -159,14 +183,16 @@ tapdisk_nbdserver_free_client(td_nbdserver_client_t *client)
 		close(client->client_fd);
 	}
 
-	list_del(client->clientlist);
+	list_del(&client->clientlist);
 	tapdisk_nbdserver_reqs_free(client);
 	free(client);
 }
 
-static int 
+int 
 tapdisk_nbdserver_enable_client(td_nbdserver_client_t *client)
 {
+    INFO("Enable client");
+
 	if(client->client_event_id >= 0) {
 		ERROR("Attempting to enable an already-enabled client");
 		return -1;
@@ -187,17 +213,21 @@ tapdisk_nbdserver_enable_client(td_nbdserver_client_t *client)
 		ERROR("Error registering events on client: %d",client->client_event_id);
 		return client->client_event_id;
 	}
+
+	return client->client_event_id;
 }
 
-static void
+void
 tapdisk_nbdserver_disable_client(td_nbdserver_client_t *client)
 {
+    INFO("Disable client");
+
 	if(client->client_event_id < 0) {
 		ERROR("Attempting to disable an already-disabled client");
 		return;
 	}
 	
-	tapdisk_server_unregester_event(client->client_event_id);
+	tapdisk_server_unregister_event(client->client_event_id);
 	client->client_event_id=-1;
 }
 
@@ -211,18 +241,63 @@ void *get_in_addr(struct sockaddr *sa)
 }
 
 
+void
+__tapdisk_nbdserver_request_cb(td_vbd_request_t *vreq, int error,
+			       void *token, int final)
+{
+    td_nbdserver_client_t *client = token;
+    td_nbdserver_req_t *req = containerof(vreq, td_nbdserver_req_t, vreq);
+    struct nbd_reply reply;
+    int tosend=0;
+    int sent=0;
+    int len=0;
 
+    reply.magic = htonl(NBD_REPLY_MAGIC);
+    reply.error = htonl(error);
+    memcpy(reply.handle, req->id, sizeof(reply.handle));
 
-static void
+    if(client->client_fd < 0) {
+	ERROR("Finishing request for client that has disappeared");
+	goto finish;
+    }
+
+    send(client->client_fd, &reply, sizeof(reply), 0);
+
+    switch(vreq->op) {
+    case TD_OP_READ:
+	tosend=len=vreq->iov->secs << SECTOR_SHIFT;
+	while(tosend>0) {
+	  sent = send(client->client_fd, vreq->iov->base+(len-tosend), tosend, 0);
+	    if(sent <= 0) {
+		ERROR("Short send or error in callback: %d",sent);
+		goto finish;
+	    }
+	    
+	    tosend -= sent;
+	}
+	break;
+    default:
+	break;
+    }
+
+ finish:
+    free(vreq->iov->base);
+    tapdisk_nbdserver_free_request(client,req);
+}
+
+void
 tapdisk_nbdserver_clientcb(event_id_t id, char mode, void *data)
 {
   td_nbdserver_client_t *client=data;
+  td_nbdserver_t *server=client->server;
   int rc;
   int len;
+  int n;
 
   /* not good enough */
   td_nbdserver_req_t *req=tapdisk_nbdserver_alloc_request(client);
-  td_vbd_request_t *vreq=req->vreq;
+  td_vbd_request_t *vreq=&req->vreq;
+  struct nbd_request request;
 
   if(req==NULL) {
 	  ERROR("Couldn't allocate request in clientcb - killing client");
@@ -230,11 +305,11 @@ tapdisk_nbdserver_clientcb(event_id_t id, char mode, void *data)
 	  return;
   }
 
-  memset(req, 0, sizeof(td_nbdserver_req_t))
+  memset(req, 0, sizeof(td_nbdserver_req_t));
   /* Read the request the client has sent */
-  rc=recv(server->client_fd, &request, sizeof(nbd_request), 0);
+  rc=recv(client->client_fd, &request, sizeof(struct nbd_request), 0);
   
-  if(rc<sizeof(nbd_request)) {
+  if(rc<sizeof(struct nbd_request)) {
 	ERROR("Short read in nbdserver_clientcb. Closing connection");
 	goto fail;
   }
@@ -247,22 +322,60 @@ tapdisk_nbdserver_clientcb(event_id_t id, char mode, void *data)
   request.from = ntohll(request.from);
   request.type = ntohl(request.type);
   len = ntohl(request.len);
-  if((len && 0x1ff != 0) || (request.from && 0x1ff != 0)) {
-	ERROR("Non sector-aligned request");
+  if(((len & 0x1ff) != 0) || ((request.from & 0x1ff) != 0)) {
+    ERROR("Non sector-aligned request (%"PRIu64",%d)",request.from,len);
+	
   }
 
+  bzero(req->id, sizeof(req->id));
+  memcpy(req->id, request.handle, sizeof(request.handle));
+  
+  rc=posix_memalign(&req->iov.base, 512, len);
+  if(rc<0) {
+    ERROR("posix_memalign failed (%d)",rc);
+    goto fail;
+  }
+  vreq->sec=request.from >> SECTOR_SHIFT;
+  vreq->iovcnt=1;
+  vreq->iov=&req->iov;
+  vreq->iov->secs = len >> SECTOR_SHIFT;
+  vreq->token = client;
+  vreq->cb = __tapdisk_nbdserver_request_cb;
+  vreq->name = req->id;
+  vreq->vbd = server->vbd;
+	  
   switch(request.type) {
   case NBD_CMD_READ:
-	  vreq.op=TD_OP_READ;
-	  vreq.sec=request.from >> SECTOR_SHIFT;
-	  vreq.iovcnt=1;
-	  vreq.iov->base = malloc(len);
-	  vreq.iov->secs = len >> SECTOR_SHIFT;
-	  vreq.token = client;
-	  vreq.cb = __tapdisk_nbdserver_request_cb;
+    vreq->op=TD_OP_READ;
+    break;
+  case NBD_CMD_WRITE:
+    vreq->op=TD_OP_WRITE;
 
-	  tapdisk_blktap_vector_request
+    n=0;
+    while(n<len) {
+      rc = recv(client->client_fd, vreq->iov->base+n, (len-n), 0);
+      if(rc <= 0) {
+	ERROR("Short send or error in callback: %d",rc);
+	goto fail;
+      }
+      
+      n += rc;
+    };
+
+    break;
+  default:
+    ERROR("Unsupported operation");
+    goto fail;
+	  
   }
+
+  rc = tapdisk_vbd_queue_request(server->vbd, vreq);
+  if (rc) {
+    ERROR("tapdisk_vbd_queue_request failed: %d",rc);
+      goto fail;
+  }
+  INFO("queued request");
+  return;
 
  fail:
 
@@ -270,7 +383,7 @@ tapdisk_nbdserver_clientcb(event_id_t id, char mode, void *data)
   return;
 }
 
-static void
+void
 tapdisk_nbdserver_newclient(event_id_t id, char mode, void *data)
 {
   struct sockaddr_storage their_addr;
@@ -278,12 +391,10 @@ tapdisk_nbdserver_newclient(event_id_t id, char mode, void *data)
   char s[INET6_ADDRSTRLEN];
   int new_fd;
   td_nbdserver_t *server=data;
-  td_vbd_t = server->vbd;
-  
 
   char buffer[256];
   int rc;
-  uint64_t tmp;
+  uint64_t tmp64;
   uint32_t tmp32;
 
   INFO("About to accept (server->listening_fd=%d)",server->listening_fd);
@@ -305,11 +416,11 @@ tapdisk_nbdserver_newclient(event_id_t id, char mode, void *data)
   /* Spit out the NBD connection stuff */
 
   memcpy(buffer, "NBDMAGIC", 8);
-  tmp=ntohll(NBD_NEGOTIATION_MAGIC);
-  memcpy(buffer+8, &tmp, sizeof(tmp));
-  tmp=ntohll(server->info.size * server->info.sector_size);
-  memcpy(buffer+16, &tmp, sizeof(tmp));
-  tmp32=ntohl(0);
+  tmp64 = htonll(NBD_NEGOTIATION_MAGIC);
+  memcpy(buffer+8, &tmp64, sizeof(tmp64));
+  tmp64 = htonll(server->info.size * server->info.sector_size);
+  memcpy(buffer+16, &tmp64, sizeof(tmp64));
+  tmp32 = htonl(0);
   memcpy(buffer+24, &tmp32, sizeof(tmp32));
   bzero(buffer+28, 124);
   
@@ -320,8 +431,12 @@ tapdisk_nbdserver_newclient(event_id_t id, char mode, void *data)
 	INFO("Short write in negotiation!");
   }	
 
+  INFO("About to alloc client");
   td_nbdserver_client_t *client=tapdisk_nbdserver_alloc_client(server);
+  INFO("Got an allocated client at %"PRIu64,(uint64_t)client);
   client->client_fd = new_fd;
+  INFO("About to enable client");
+  
 
   if(tapdisk_nbdserver_enable_client(client) < 0) {
 	  ERROR("Error enabling client");
@@ -350,6 +465,7 @@ tapdisk_nbdserver_open(td_vbd_t *vbd, td_disk_info_t *info)
 	memset(server, 0, sizeof(*server));
 	server->listening_fd = -1;
 	server->listening_event_id = -1;
+	INIT_LIST_HEAD(&server->clients);
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;

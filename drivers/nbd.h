@@ -17,7 +17,7 @@
 
 //#include <linux/types.h>
 
-#define NBD_NEGOTIATION_MAGIC = 0x00420281861253LL
+#define NBD_NEGOTIATION_MAGIC 0x00420281861253LL
 
 #define NBD_SET_SOCK	_IO( 0xab, 0 )
 #define NBD_SET_BLKSIZE	_IO( 0xab, 1 )
