@@ -41,6 +41,8 @@
 #include "tapdisk-server.h"
 #include "tapdisk-control.h"
 
+void tdnbd_fdreceiver_start();
+
 static void
 usage(const char *app, int err)
 {
@@ -79,6 +81,7 @@ main(int argc, char *argv[])
 	char *control;
 	int c, err, nodaemon;
 	FILE *out;
+	td_vbd_t *vbd;
 
 	control  = NULL;
 	nodaemon = 0;
@@ -136,6 +139,15 @@ main(int argc, char *argv[])
 
 	fprintf(out, "%s\n", control);
 	fclose(out);
+
+	vbd = tapdisk_vbd_create(0);
+	if (!vbd) {
+		err = -ENOMEM;
+		goto out;
+	}
+
+	tapdisk_server_add_vbd(vbd);
+	tdnbd_fdreceiver_start();
 
 	err = tapdisk_server_run();
 

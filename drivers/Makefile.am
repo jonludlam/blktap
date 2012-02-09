@@ -69,6 +69,8 @@ libtapdisk_la_SOURCES += io-optimize.h
 #libtapdisk_la_SOURCES += lock.h
 libtapdisk_la_SOURCES += atomicio.c
 libtapdisk_la_SOURCES += atomicio.h
+libtapdisk_la_SOURCES += tapdisk-fdreceiver.c
+libtapdisk_la_SOURCES += tapdisk-fdreceiver.h
 
 libtapdisk_la_SOURCES += block-aio.c
 libtapdisk_la_SOURCES += block-ram.c

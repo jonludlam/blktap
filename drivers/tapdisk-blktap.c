@@ -541,6 +541,8 @@ tapdisk_blktap_open(const char *devname, td_vbd_t *vbd, td_blktap_t **_tap)
 	struct stat st;
 	int err;
 
+	DBG("Opening");
+
 	tap = malloc(sizeof(*tap));
 	if (!tap) {
 		err = -errno;
@@ -566,9 +568,13 @@ tapdisk_blktap_open(const char *devname, td_vbd_t *vbd, td_blktap_t **_tap)
 	tap->vbd   = vbd;
 	tap->minor = minor(st.st_rdev);
 
+	DBG("minor=%d",tap->minor);
+
 	err = tapdisk_blktap_map(tap);
 	if (err)
 		goto fail;
+
+	DBG("Registering events");
 
 	tap->event_id =
 		tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
@@ -580,9 +586,13 @@ tapdisk_blktap_open(const char *devname, td_vbd_t *vbd, td_blktap_t **_tap)
 		goto fail;
 	}
 
+	DBG("Events registered, id=%d",tap->event_id);
+
 	err = tapdisk_blktap_reqs_init(tap, BLKTAP_RING_SIZE);
 	if (err)
 		goto fail;
+
+	DBG("tapdisk_blktap_reqs_init succeeded");
 
 	if (_tap)
 		*_tap = tap;

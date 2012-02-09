@@ -45,8 +45,7 @@ struct td_nbdserver {
 	int                     listening_fd;
 	int                     listening_event_id;
 
-	struct list_head        entry;
-
+	struct td_fdreceiver   *fdreceiver;
 	struct list_head        clients;
 };
 
@@ -64,6 +63,8 @@ struct td_nbdserver_client {
 	struct list_head        clientlist;
 };
 
-int tapdisk_nbdserver_open(td_vbd_t *, td_disk_info_t *);
+td_nbdserver_t *tapdisk_nbdserver_alloc(td_vbd_t *, td_disk_info_t);
+int tapdisk_nbdserver_listen(td_nbdserver_t *, int);
+void tapdisk_nbdserver_free(td_nbdserver_t *);
 
 #endif /* _TAPDISK_NBDSERVER_H_ */

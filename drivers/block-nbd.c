@@ -16,6 +16,7 @@
 #include "tapdisk-driver.h"
 #include "tapdisk-interface.h"
 #include "tapdisk-utils.h"
+#include "tapdisk-fdreceiver.h"
 #include "nbd.h"
 
 #ifdef HAVE_CONFIG_H
@@ -25,6 +26,24 @@
 #define INFO(_f, _a...)            tlog_syslog(TLOG_INFO, "nbd: " _f, ##_a)
 #define ERROR(_f, _a...)           tlog_syslog(TLOG_WARN, "nbd: " _f, ##_a)
 
+#define N_PASSED_FDS 10
+#define TAPDISK_NBDCLIENT_MAX_PATH_LEN 256
+#define TAPDISK_NBDCLIENT_LISTENING_SOCK_PATH "/var/run/blktap-control/nbdclient"
+/* We'll only ever have one nbdclient fd receiver per tapdisk process, 
+   so let's just store it here globally. We'll also keep track of the 
+   passed fds here too. */
+
+struct td_fdreceiver *fdreceiver=NULL;
+
+struct tdnbd_passed_fd {
+	char id[40];
+	struct timeval t;
+	int fd;
+} passed_fds[N_PASSED_FDS];
+
+
+
+
 struct tdnbd_data {
 	/* Socket details */
 	int                 socket;
@@ -33,59 +52,78 @@ struct tdnbd_data {
     int                 port;
 };
 
-int tdnbd_connect_import_session(struct tdnbd_data *prv, td_driver_t* driver)
+/* -- fdreceiver bits and pieces -- */
+
+void
+tdnbd_stash_passed_fd(int fd, char *msg, void *data) 
+{
+	int free_index=-1;
+	int i;
+	for(i=0; i<N_PASSED_FDS; i++) {
+		if(passed_fds[i].fd == -1) {
+			free_index=i;
+			break;
+		}
+	}
+
+	if(free_index==-1) {
+		ERROR("Error - more than %d fds passed! cannot stash another.",N_PASSED_FDS);
+		close(fd);
+		return;
+	}
+
+	passed_fds[free_index].fd=fd;
+	strncpy(passed_fds[free_index].id, msg, sizeof(passed_fds[free_index].id));
+	gettimeofday(&passed_fds[free_index].t, NULL);
+
+}
+
+int tdnbd_retreive_passed_fd(const char *name) 
+{
+	int fd, i;
+
+	for(i=0; i<N_PASSED_FDS; i++) {
+		if(strncmp(name, passed_fds[i].id,sizeof(passed_fds[i].id))==0) {
+			fd=passed_fds[i].fd;
+			passed_fds[i].fd = -1;
+			return fd;
+		}
+	}
+
+	ERROR("Couldn't find the fd named: %s",name);
+
+	return -1;
+}
+
+void 
+tdnbd_fdreceiver_start() 
+{
+	char fdreceiver_path[TAPDISK_NBDCLIENT_MAX_PATH_LEN];
+	int i;
+
+	/* initialise the passed fds list */
+	for(i=0; i<N_PASSED_FDS; i++) {
+		passed_fds[i].fd = -1;
+	}
+
+	snprintf(fdreceiver_path, TAPDISK_NBDCLIENT_MAX_PATH_LEN,
+			 "%s%d", TAPDISK_NBDCLIENT_LISTENING_SOCK_PATH, getpid());
+
+	fdreceiver=td_fdreceiver_start(fdreceiver_path,
+								   tdnbd_stash_passed_fd, NULL);
+
+}
+
+int tdnbd_nbd_negotiate(struct tdnbd_data *prv, td_driver_t *driver)
 {
 #define RECV_BUFFER_SIZE 256
-	int sock;
-	int opt = 1;
 	int rc;
 	char buffer[RECV_BUFFER_SIZE];
 	uint64_t magic;
 	uint64_t size;
 	uint32_t flags;
 	int padbytes = 124;
-
-	sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (sock < 0) {
-		ERROR("Could not create socket: %s\n", strerror(errno));
-		return -1;
-	}
-
-	rc = setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (void *)&opt, sizeof(opt));
-	if (rc < 0) {
-		ERROR("Could not set TCP_NODELAY: %s\n", strerror(errno));
-		return -1;
-	}
-
-	prv->remote = (struct sockaddr_in *)malloc(sizeof(struct sockaddr_in *));
-	if (!prv->remote) {
-		ERROR("struct sockaddr_in malloc failure\n");
-		close(sock);
-		return -1;
-	}
-	prv->remote->sin_family = AF_INET;
-	rc = inet_pton(AF_INET, prv->peer_ip, &(prv->remote->sin_addr.s_addr));
-	if (rc < 0) {
-		ERROR("Could not create inaddr: %s\n", strerror(errno));
-		free(prv->remote);
-		prv->remote = NULL;
-		close(sock);
-		return -1;
-	}
-	else if (rc == 0) {
-		ERROR("inet_pton parse error\n");
-		free(prv->remote);
-		prv->remote = NULL;
-		close(sock);
-		return -1;
-	}
-	prv->remote->sin_port = htons(prv->port);
-  
-	if (connect(sock, (struct sockaddr *)prv->remote, sizeof(struct sockaddr)) < 0) {
-		ERROR("Could not connect to peer: %s\n", strerror(errno));
-		close(sock);
-		return -1;
-	}
+	int sock = prv->socket;
 
 	/* NBD negotiation protocol: 
 	 *
@@ -158,12 +196,63 @@ int tdnbd_connect_import_session(struct tdnbd_data *prv, td_driver_t* driver)
 	
 	INFO("Successfully connected to NBD server");
 
+	return 0;
+}
+
+
+int tdnbd_connect_import_session(struct tdnbd_data *prv, td_driver_t* driver)
+{
+	int sock;
+	int opt = 1;
+	int rc;
+
+	sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (sock < 0) {
+		ERROR("Could not create socket: %s\n", strerror(errno));
+		return -1;
+	}
+
+	rc = setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (void *)&opt, sizeof(opt));
+	if (rc < 0) {
+		ERROR("Could not set TCP_NODELAY: %s\n", strerror(errno));
+		return -1;
+	}
+
+	prv->remote = (struct sockaddr_in *)malloc(sizeof(struct sockaddr_in *));
+	if (!prv->remote) {
+		ERROR("struct sockaddr_in malloc failure\n");
+		close(sock);
+		return -1;
+	}
+	prv->remote->sin_family = AF_INET;
+	rc = inet_pton(AF_INET, prv->peer_ip, &(prv->remote->sin_addr.s_addr));
+	if (rc < 0) {
+		ERROR("Could not create inaddr: %s\n", strerror(errno));
+		free(prv->remote);
+		prv->remote = NULL;
+		close(sock);
+		return -1;
+	}
+	else if (rc == 0) {
+		ERROR("inet_pton parse error\n");
+		free(prv->remote);
+		prv->remote = NULL;
+		close(sock);
+		return -1;
+	}
+	prv->remote->sin_port = htons(prv->port);
+  
+	if (connect(sock, (struct sockaddr *)prv->remote, sizeof(struct sockaddr)) < 0) {
+		ERROR("Could not connect to peer: %s\n", strerror(errno));
+		close(sock);
+		return -1;
+	}
+
 	prv->socket = sock;
 
-	return 0;
-
-
+	return tdnbd_nbd_negotiate(prv, driver);
 }
+
 
 int tdnbd_send_chunk(struct tdnbd_data *prv, const char *buffer, uint32_t length, uint64_t offset)
 {
@@ -303,6 +392,7 @@ int tdnbd_recv_chunk(struct tdnbd_data *prv, char *buffer, uint32_t length, uint
 	return 0;
 }
 
+
 /* -- interface -- */
 
 static int tdnbd_close(td_driver_t*);
@@ -323,24 +413,33 @@ static int tdnbd_open(td_driver_t* driver, const char* name, td_flag_t flags)
 	INFO("Opening nbd export to %s\n", name);
 
 	rc = sscanf(name, "%255[^:]:%d", peer_ip, &port);
-	if (rc != 2) {
-		ERROR("Could not parse nbd destination");
-		return -1;
+	if (rc == 2) {
+		prv->peer_ip = malloc(strlen(peer_ip) + 1);
+		if (!prv->peer_ip) {
+			ERROR("Failure to malloc for NBD destination");
+			return -1;
+		}
+		strcpy(prv->peer_ip, peer_ip);
+		prv->port=port;
+		
+		INFO("Export peer=%s port=%d\n", prv->peer_ip, prv->port);
+		if (tdnbd_connect_import_session(prv, driver) < 0) {
+			return -1;
+		}
+		
+		return 0;
+	} else {
+		prv->socket = tdnbd_retreive_passed_fd(name);
+		if(prv->socket < 0) {
+			ERROR("Couln't find fd named: %s",name);
+			return -1;
+		}
+		INFO("Found passed fd. Connecting...");
+		prv->remote = NULL;
+		prv->peer_ip = NULL;
+		prv->port = -1;
+		return tdnbd_nbd_negotiate(prv, driver);
 	}
-	prv->peer_ip = malloc(strlen(peer_ip) + 1);
-	if (!prv->peer_ip) {
-	    ERROR("Failure to malloc for NBD destination");
-		return -1;
-	}
-	strcpy(prv->peer_ip, peer_ip);
-	prv->port=port;
-
-	INFO("Export peer=%s port=%d\n", prv->peer_ip, prv->port);
-	if (tdnbd_connect_import_session(prv, driver) < 0) {
-		return -1;
-	}
-
-	return 0;
 }
 
 static int tdnbd_close(td_driver_t* driver)

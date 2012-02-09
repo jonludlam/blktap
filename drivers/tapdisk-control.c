@@ -599,14 +599,10 @@ tapdisk_control_attach_vbd(struct tapdisk_ctl_conn *conn,
 	td_vbd_t *vbd;
 	int minor, err;
 
-	/*
-	 * TODO: check for max vbds per process
-	 */
-
 	vbd = tapdisk_server_get_vbd(request->cookie);
-	if (vbd) {
-		err = -EEXIST;
-		goto out;
+	if (!vbd) {
+	  err = -EINVAL;
+	  goto out;
 	}
 
 	minor = request->cookie;
@@ -615,26 +611,18 @@ tapdisk_control_attach_vbd(struct tapdisk_ctl_conn *conn,
 		goto out;
 	}
 
-	vbd = tapdisk_vbd_create(minor);
-	if (!vbd) {
-		err = -ENOMEM;
-		goto out;
-	}
-
 	err = asprintf(&devname, BLKTAP2_RING_DEVICE"%d", minor);
 	if (err == -1) {
 		devname = NULL;
 		err = -ENOMEM;
-		goto fail_vbd;
+		goto out;
 	}
 
 	err = tapdisk_vbd_attach(vbd, devname, minor);
 	if (err) {
-		ERR(err, "failure attaching to %s", devname);
-		goto fail_vbd;
+	  ERR(err, "failure attaching to %s", devname);
+	  goto out;
 	}
-
-	tapdisk_server_add_vbd(vbd);
 
 out:
 	if (devname)
@@ -649,10 +637,6 @@ out:
 
 	return;
 
-fail_vbd:
-	tapdisk_vbd_detach(vbd);
-	free(vbd);
-	goto out;
 }
 
 
@@ -708,10 +692,10 @@ tapdisk_control_open_image(struct tapdisk_ctl_conn *conn,
 		goto out;
 	}
 
-	if (!vbd->tap) {
+	/*	if (!vbd->tap) {
 		err = -EINVAL;
 		goto out;
-	}
+		}*/
 
 	if (vbd->name) {
 		err = -EALREADY;
@@ -754,15 +738,22 @@ tapdisk_control_open_image(struct tapdisk_ctl_conn *conn,
 	if (err)
 		goto fail_close;
 
-	err = tapdisk_blktap_create_device(vbd->tap, &info,
-					   !!(flags & TD_OPEN_RDONLY));
-	if (err && err != -EEXIST) {
-		err = -errno;
-		EPRINTF("create device failed: %d\n", err);
-		goto fail_close;
+	if (vbd->tap) {
+	  err = tapdisk_blktap_create_device(vbd->tap, &info,
+					     !!(flags & TD_OPEN_RDONLY));
+	  if (err && err != -EEXIST) {
+	    err = -errno;
+	    EPRINTF("create device failed: %d\n", err);
+	    goto fail_close;
+	  }
 	}
 
-	err = tapdisk_nbdserver_open(vbd, &info);
+	err = tapdisk_vbd_start_nbdserver(vbd);
+
+	if (err) {
+		EPRINTF("failed to start nbdserver: %d\n",err);
+		goto fail_close;
+	}
 
 	err = 0;
 
